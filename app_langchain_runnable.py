@@ -1,8 +1,9 @@
 import chainlit as cl
 from chainlit.input_widget import TextInput, Switch
 import os
-import uuid
-from langchain_community.chat_models import ChatOpenAI
+
+# from langchain_community.chat_models import ChatOpenAI
+from langchain_openai import ChatOpenAI
 from langchain_community.chat_models.fake import FakeListChatModel
 from langchain.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain.schema.output_parser import StrOutputParser
@@ -13,12 +14,22 @@ from langchain_core.chat_history import (
     InMemoryChatMessageHistory,
 )
 from langchain_core.runnables.history import RunnableWithMessageHistory
+from chainlit.types import ThreadDict
+from langchain_core.messages import HumanMessage, AIMessage
+
+
+def get_current_chainlit_thread_id() -> str:
+    """
+    https://github.com/Chainlit/chainlit/issues/1385
+    """
+    return cl.context.session.thread_id
 
 
 def get_by_session_id(session_id: str) -> BaseChatMessageHistory:
     store = cl.user_session.get("store", {})
     if session_id not in store:
         print("Initialize Chat Message History")
+        # BUG: TypeError: Object of type InMemoryChatMessageHistory is not JSON serializable
         store[session_id] = InMemoryChatMessageHistory()
         cl.user_session.set("store", store)
     return store[session_id]
@@ -92,10 +103,7 @@ def auth_callback(username: str, password: str):
 
 @cl.on_chat_start
 async def start():
-    if not cl.user_session.get("store"):
-        cl.user_session.set("store", {})
-    cl.user_session.set("session_id", str(uuid.uuid4()))  # Unique session ID
-    print("Current session_id is", cl.user_session.get("session_id"))
+    print("Current thread_id is", get_current_chainlit_thread_id(), "(on_chat_start)")
 
     settings = await cl.ChatSettings(
         [
@@ -123,13 +131,47 @@ async def setup_agent(settings: cl.ChatSettings):
     setup_runnable(api_key=api_key, streaming=streaming, use_fake=use_fake)
 
 
+# NOTE: this feature requires Literal AI or custom storage
+@cl.on_chat_resume
+async def on_chat_resume(thread: ThreadDict):
+    chainlit_thread_id = thread.get("id")
+    print(chainlit_thread_id, get_current_chainlit_thread_id())  # they are the same!
+    print("Resume Chat Message History")
+    store = cl.user_session.get("store", {})
+    # BUG: TypeError: Object of type InMemoryChatMessageHistory is not JSON serializable
+    message_history = InMemoryChatMessageHistory()
+    messages = []
+    # for message in thread["steps"]:
+    #     if message["type"] == "user_message":
+    #         message_history.add_user_message(message["output"])
+    #     elif message["type"] == "assistant_message":
+    #         message_history.add_ai_message(message["output"])
+    #     # else:
+    #     #     print("Ignored message:", message)
+    for message in thread["steps"]:
+        if message["type"] == "user_message":
+            messages.append(HumanMessage(content=message["output"]))
+        elif message["type"] == "assistant_message":
+            messages.append(AIMessage(content=message["output"]))
+    await message_history.aadd_messages(messages)
+    store[chainlit_thread_id] = message_history
+    cl.user_session.set("store", store)
+
+    api_key = cl.user_session.get("chat_settings").get(
+        "api_key", os.getenv("OPENAI_API_KEY")
+    )
+    streaming = cl.user_session.get("chat_settings").get("streaming", True)
+    use_fake = cl.user_session.get("chat_settings").get("use_fake", False)
+    setup_runnable(api_key=api_key, streaming=streaming, use_fake=use_fake)
+
+
 @cl.on_message
 async def handle_message(message: cl.Message):
     runnable = cl.user_session.get("runnable")  # type: Runnable
 
-    print("Current session_id is", cl.user_session.get("session_id"))
-    history = get_by_session_id(cl.user_session.get("session_id"))
-    # print("History message:", history.messages)
+    chainlit_thread_id = get_current_chainlit_thread_id()
+    print("Current thread_id is", get_current_chainlit_thread_id(), "(on_message)")
+    history = get_by_session_id(chainlit_thread_id)
     print("History message length:", len(history.messages))
 
     if cl.user_session.get("chat_settings").get("streaming"):
@@ -138,7 +180,7 @@ async def handle_message(message: cl.Message):
         async for chunk in runnable.astream(
             {"question": message.content},
             config=RunnableConfig(
-                configurable={"session_id": cl.user_session.get("session_id")},
+                configurable={"session_id": chainlit_thread_id},
                 callbacks=[
                     cl.LangchainCallbackHandler()
                 ],  # This is used to show intermediate message in Chainlit
@@ -150,7 +192,7 @@ async def handle_message(message: cl.Message):
             content=runnable.invoke(
                 {"question": message.content},
                 config=RunnableConfig(
-                    configurable={"session_id": cl.user_session.get("session_id")},
+                    configurable={"session_id": chainlit_thread_id},
                     callbacks=[
                         cl.LangchainCallbackHandler()
                     ],  # This is used to show intermediate message in Chainlit

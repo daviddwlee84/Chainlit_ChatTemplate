@@ -23,6 +23,9 @@ chainlit run app_langchain_runnable.py -w
 ## Todo
 
 - [ ] `@cl.on_chat_resume`
+  - [X] Able to resume chat history by thread id
+  - [ ] Resume chat should kept the history on UI: [Chat history is not getting retrieved on the chat resume · Issue #1499 · Chainlit/chainlit](https://github.com/Chainlit/chainlit/issues/1499)
+- [ ] Fix bug of `TypeError: Object of type InMemoryChatMessageHistory is not JSON serializable`
 - [ ] Self-host Literal AI: [Manual Deployment - Literal AI Documentation](https://docs.literalai.com/self-hosting/deployment)
 - [ ] Try [Custom Data Layer - Chainlit](https://docs.chainlit.io/api-reference/data-persistence/custom-data-layer) (Literal AI replacement)
 
