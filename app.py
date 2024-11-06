@@ -1,6 +1,28 @@
 import chainlit as cl
 from chainlit.input_widget import TextInput
 import os
+from langchain_community.chat_models import ChatOpenAI
+from langchain.prompts import ChatPromptTemplate
+from langchain.schema.output_parser import StrOutputParser
+from langchain.schema.runnable import Runnable
+from langchain.schema.runnable.config import RunnableConfig
+
+
+# https://docs.chainlit.io/integrations/langchain
+def setup_runnable():
+    model = ChatOpenAI(streaming=True)
+    prompt = ChatPromptTemplate.from_messages(
+        [
+            (
+                "system",
+                "You're a very knowledgeable historian who provides accurate and eloquent answers to historical questions.",
+            ),
+            ("human", "{question}"),
+        ]
+    )
+
+    runnable = prompt | model | StrOutputParser()
+    cl.user_session.set("runnable", runnable)
 
 
 # https://docs.chainlit.io/authentication/password
@@ -28,24 +50,28 @@ async def start():
             ),
         ]
     ).send()
-    value = settings["api_key"]
-    print(value)
-    cl.user_session.set("api_key", value)
+    print("on_chat_start", settings)
+    # TODO: pass api_key?
+    setup_runnable()
 
 
 # https://docs.chainlit.io/api-reference/chat-settings
 @cl.on_settings_update
 async def setup_agent(settings: cl.ChatSettings):
     print("on_settings_update", settings)
-    value = settings["api_key"]
-    print(value)
-    cl.user_session.set("api_key", value)
+    # TODO: pass api_key and setup_runnable?
 
 
 @cl.on_message
 async def handle_message(message: cl.Message):
-    user_api_key = cl.user_session.get("api_key")
-    # Use the user_api_key for your API calls
-    await cl.Message(
-        f"Hi {cl.user_session.get('user').display_name}, Your API key is: {user_api_key}"
-    ).send()
+    runnable = cl.user_session.get("runnable")  # type: Runnable
+
+    res = cl.Message(content="")
+
+    async for chunk in runnable.astream(
+        {"question": message.content},
+        config=RunnableConfig(callbacks=[cl.LangchainCallbackHandler()]),
+    ):
+        await res.stream_token(chunk)
+
+    await res.send()
