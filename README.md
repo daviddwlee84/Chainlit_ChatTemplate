@@ -26,8 +26,9 @@ chainlit run app_langchain_runnable.py -w
   - [X] Able to resume chat history by thread id
   - [ ] Resume chat should kept the history on UI: [Chat history is not getting retrieved on the chat resume · Issue #1499 · Chainlit/chainlit](https://github.com/Chainlit/chainlit/issues/1499)
 - [ ] Fix bug of `TypeError: Object of type InMemoryChatMessageHistory is not JSON serializable`
-- [ ] Self-host Literal AI: [Manual Deployment - Literal AI Documentation](https://docs.literalai.com/self-hosting/deployment)
 - [ ] Try [Custom Data Layer - Chainlit](https://docs.chainlit.io/api-reference/data-persistence/custom-data-layer) (Literal AI replacement)
+  - [Support SQLite for custom data layer by tjroamer · Pull Request #832 · Chainlit/chainlit](https://github.com/Chainlit/chainlit/pull/832)- [[Draft] Proposal for SQLAlchemy Data Layer with ORM by qtangs · Pull Request #1365 · Chainlit/chainlit](https://github.com/Chainlit/chainlit/pull/1365)
+- [ ] ~~Self-host Literal AI: [Manual Deployment - Literal AI Documentation](https://docs.literalai.com/self-hosting/deployment) (The Docker image is available on a private registry.)~~
 
 ## Resources
 

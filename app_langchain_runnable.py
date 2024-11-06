@@ -17,6 +17,15 @@ from langchain_core.runnables.history import RunnableWithMessageHistory
 from chainlit.types import ThreadDict
 from langchain_core.messages import HumanMessage, AIMessage
 
+# https://docs.chainlit.io/data-persistence/custom#sql-alchemy-data-layer
+# import chainlit.data as cl_data
+# from chainlit.data.sql_alchemy import SQLAlchemyDataLayer
+#
+# cl_data._data_layer = SQLAlchemyDataLayer(
+#     conninfo="sqlite+aiosqlite:///chainlit.db",
+#     # storage_provider=storage_client
+# )
+
 
 def get_current_chainlit_thread_id() -> str:
     """
@@ -33,6 +42,52 @@ def get_by_session_id(session_id: str) -> BaseChatMessageHistory:
         store[session_id] = InMemoryChatMessageHistory()
         cl.user_session.set("store", store)
     return store[session_id]
+
+
+# https://www.reddit.com/r/ChatGPTPro/comments/12juous/cbt_therapy_prompt/
+CBT_THERAPY_PROMPT = """
+As a Cognitive Behavioral Therapist, your kind and open approach to CBT allows users to confide in you. You ask questions one by one and collect the user's responses to implement the following steps of CBT:
+
+1. Help the user identify troubling situations or conditions in their life.
+2. Help the user become aware of their thoughts, emotions, and beliefs about these problems.
+
+Using the user's answers to the questions, you identify and categorize negative or inaccurate thinking that is causing the user anguish into one or more of the following CBT-defined categories:
+
+- All-or-Nothing Thinking
+- Overgeneralization
+- Mental Filter
+- Disqualifying the Positive
+- Jumping to Conclusions
+- Mind Reading
+- Fortune Telling
+- Magnification (Catastrophizing) or Minimization
+- Emotional Reasoning
+- Should Statements
+- Labeling and Mislabeling
+- Personalization
+
+After identifying and informing the user of the type of negative or inaccurate thinking based on the above list, you help the user reframe their thoughts through cognitive restructuring. You ask questions one at a time to help the user process each question separately.
+
+For example, you may ask:
+
+- What evidence do I have to support this thought? What evidence contradicts it?
+- Is there an alternative explanation or perspective for this situation?
+- Am I overgeneralizing or applying an isolated incident to a broader context?
+- Am I engaging in black-and-white thinking or considering the nuances of the situation?
+- Am I catastrophizing or exaggerating the negative aspects of the situation?
+- Am I taking this situation personally or blaming myself unnecessarily?
+- Am I jumping to conclusions or making assumptions without sufficient evidence?
+- Am I using "should" or "must" statements that set unrealistic expectations for myself or others?
+- Am I engaging in emotional reasoning, assuming that my feelings represent the reality of the situation?
+- Am I using a mental filter that focuses solely on the negative aspects while ignoring the positives?
+- Am I engaging in mind reading, assuming I know what others are thinking or feeling without confirmation?
+- Am I labeling myself or others based on a single event or characteristic?
+- How would I advise a friend in a similar situation?
+- What are the potential consequences of maintaining this thought? How would changing this thought benefit me?
+- Is this thought helping me achieve my goals or hindering my progress?
+
+Using the user's answers, you ask them to reframe their negative thoughts with your expert advice. As a parting message, you can reiterate and reassure the user with a hopeful message.
+"""
 
 
 # https://docs.chainlit.io/integrations/langchain
@@ -66,7 +121,7 @@ def setup_runnable(api_key: str, streaming: bool = True, use_fake: bool = False)
         [
             (
                 "system",
-                "You're a very knowledgeable historian who provides accurate and eloquent answers to historical questions.",
+                CBT_THERAPY_PROMPT + "\nUser name is {username}.",
             ),
             MessagesPlaceholder(variable_name="history"),
             ("human", "{question}"),
@@ -174,30 +229,24 @@ async def handle_message(message: cl.Message):
     history = get_by_session_id(chainlit_thread_id)
     print("History message length:", len(history.messages))
 
+    input_message = dict(
+        input={
+            "username": cl.context.session.user.display_name,
+            "question": message.content,
+        },
+        config=RunnableConfig(
+            configurable={"session_id": chainlit_thread_id},
+            callbacks=[
+                cl.LangchainCallbackHandler()
+            ],  # This is used to show intermediate message in Chainlit
+        ),
+    )
+
     if cl.user_session.get("chat_settings").get("streaming"):
         res = cl.Message(content="")
-
-        async for chunk in runnable.astream(
-            {"question": message.content},
-            config=RunnableConfig(
-                configurable={"session_id": chainlit_thread_id},
-                callbacks=[
-                    cl.LangchainCallbackHandler()
-                ],  # This is used to show intermediate message in Chainlit
-            ),
-        ):
+        async for chunk in runnable.astream(**input_message):
             await res.stream_token(chunk)
     else:
-        res = cl.Message(
-            content=runnable.invoke(
-                {"question": message.content},
-                config=RunnableConfig(
-                    configurable={"session_id": chainlit_thread_id},
-                    callbacks=[
-                        cl.LangchainCallbackHandler()
-                    ],  # This is used to show intermediate message in Chainlit
-                ),
-            )
-        )
+        res = cl.Message(content=runnable.invoke(**input_message))
 
     await res.send()
