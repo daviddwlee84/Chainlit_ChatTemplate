@@ -9,8 +9,13 @@ from langchain.schema.runnable.config import RunnableConfig
 
 
 # https://docs.chainlit.io/integrations/langchain
-def setup_runnable():
-    model = ChatOpenAI(streaming=True)
+def setup_runnable(api_key: str, streaming: bool = True):
+    """
+    https://python.langchain.com/docs/concepts/runnables/
+    https://python.langchain.com/api_reference/core/runnables/langchain_core.runnables.base.Runnable.html
+    https://python.langchain.com/v0.1/docs/expression_language/interface/
+    """
+    model = ChatOpenAI(api_key=api_key, streaming=streaming)
     prompt = ChatPromptTemplate.from_messages(
         [
             (
@@ -50,16 +55,15 @@ async def start():
             ),
         ]
     ).send()
-    print("on_chat_start", settings)
-    # TODO: pass api_key?
-    setup_runnable()
+    api_key = settings.get("api_key", os.getenv("OPENAI_API_KEY"))
+    setup_runnable(api_key=api_key)
 
 
 # https://docs.chainlit.io/api-reference/chat-settings
 @cl.on_settings_update
 async def setup_agent(settings: cl.ChatSettings):
-    print("on_settings_update", settings)
-    # TODO: pass api_key and setup_runnable?
+    api_key = settings.get("api_key", os.getenv("OPENAI_API_KEY"))
+    setup_runnable(api_key=api_key)
 
 
 @cl.on_message
