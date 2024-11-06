@@ -1,7 +1,8 @@
 import chainlit as cl
-from chainlit.input_widget import TextInput
+from chainlit.input_widget import TextInput, Switch
 import os
 from langchain_community.chat_models import ChatOpenAI
+from langchain_community.chat_models.fake import FakeListChatModel
 from langchain.prompts import ChatPromptTemplate
 from langchain.schema.output_parser import StrOutputParser
 from langchain.schema.runnable import Runnable
@@ -9,13 +10,23 @@ from langchain.schema.runnable.config import RunnableConfig
 
 
 # https://docs.chainlit.io/integrations/langchain
-def setup_runnable(api_key: str, streaming: bool = True):
+def setup_runnable(api_key: str, streaming: bool = True, use_fake: bool = False):
     """
+    Runnable
     https://python.langchain.com/docs/concepts/runnables/
     https://python.langchain.com/api_reference/core/runnables/langchain_core.runnables.base.Runnable.html
     https://python.langchain.com/v0.1/docs/expression_language/interface/
     """
-    model = ChatOpenAI(api_key=api_key, streaming=streaming)
+    if not use_fake:
+        model = ChatOpenAI(api_key=api_key, streaming=streaming)
+    else:
+        model = FakeListChatModel(
+            responses=[
+                "Hello! How can I assist you today?",
+                "I'm here to help with your questions.",
+                "Feel free to ask me anything.",
+            ]
+        )
     prompt = ChatPromptTemplate.from_messages(
         [
             (
@@ -53,29 +64,44 @@ async def start():
             TextInput(
                 id="api_key", label="API Key", initial=os.getenv("OPENAI_API_KEY")
             ),
+            # https://docs.chainlit.io/api-reference/input-widgets/switch
+            Switch(id="streaming", label="Stream Tokens", initial=True),
+            Switch(id="use_fake", label="Use Fake Model", initial=False),
         ]
     ).send()
     api_key = settings.get("api_key", os.getenv("OPENAI_API_KEY"))
-    setup_runnable(api_key=api_key)
+    streaming = settings.get("streaming", True)
+    use_fake = settings.get("use_fake", False)
+    setup_runnable(api_key=api_key, streaming=streaming, use_fake=use_fake)
 
 
 # https://docs.chainlit.io/api-reference/chat-settings
 @cl.on_settings_update
 async def setup_agent(settings: cl.ChatSettings):
     api_key = settings.get("api_key", os.getenv("OPENAI_API_KEY"))
-    setup_runnable(api_key=api_key)
+    streaming = settings.get("streaming", True)
+    use_fake = settings.get("use_fake", False)
+    setup_runnable(api_key=api_key, streaming=streaming, use_fake=use_fake)
 
 
 @cl.on_message
 async def handle_message(message: cl.Message):
     runnable = cl.user_session.get("runnable")  # type: Runnable
 
-    res = cl.Message(content="")
+    if cl.user_session.get("chat_settings").get("streaming"):
+        res = cl.Message(content="")
 
-    async for chunk in runnable.astream(
-        {"question": message.content},
-        config=RunnableConfig(callbacks=[cl.LangchainCallbackHandler()]),
-    ):
-        await res.stream_token(chunk)
+        async for chunk in runnable.astream(
+            {"question": message.content},
+            config=RunnableConfig(callbacks=[cl.LangchainCallbackHandler()]),
+        ):
+            await res.stream_token(chunk)
+    else:
+        res = cl.Message(
+            content=runnable.invoke(
+                {"question": message.content},
+                config=RunnableConfig(callbacks=[cl.LangchainCallbackHandler()]),
+            )
+        )
 
     await res.send()
